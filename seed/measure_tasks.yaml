@@ -1,0 +1,27 @@
+# Ten scripted tasks for the Increment 2 measurement. `must_pin` lists the
+# approved decisions a correct package has to carry. Trap tasks are worded so
+# the binding decision is not textually similar to the request.
+tasks:
+  - { id: m01, member: sneha, task: t20, text: "Implement the login API",
+      must_pin: [auth.token_transport, auth.mechanism, api.error_format] }
+  - { id: m02, member: riya, task: t21, text: "Build the login page with field validation",
+      must_pin: [auth.token_transport, ui.forms.library, ui.styling] }
+  - { id: m03, member: kabir, task: t22, text: "Write pytest cases for POST /api/auth/login",
+      must_pin: [auth.token_transport, api.error_format, testing.backend_framework] }
+  - { id: m04, member: meera, text: "Add a show-password toggle to the login form",
+      must_pin: [ui.forms.library, ui.styling, auth.token_transport] }
+  - { id: m05, member: aarav, trap: true,
+      text: "Add a remember-me checkbox so people stay signed in for a week",
+      must_pin: [auth.token_transport, auth.session_ttl_minutes] }
+  - { id: m06, member: ishaan, task: t24, text: "Rotate refresh tokens on every refresh call",
+      must_pin: [auth.token_transport, auth.mechanism] }
+  - { id: m07, member: rohan, task: t31, text: "Add the open-task counter to the dashboard summary endpoint",
+      must_pin: [api.error_format, db.engine] }
+  - { id: m08, member: tanvi, task: t32, text: "Test the weather proxy's cache and its upstream failure path",
+      must_pin: [api.error_format, testing.backend_framework] }
+  - { id: m09, member: aarav, task: t30, trap: true,
+      text: "Send visitors who aren't logged in from the dashboard back to the login screen",
+      must_pin: [auth.token_transport] }
+  - { id: m10, member: rohan, trap: true, expect_contradiction: auth.token_transport,
+      text: "Return the access token in the login response body so a mobile client can read it",
+      must_pin: [auth.token_transport, auth.mechanism] }

@@ -1,0 +1,42 @@
+openapi: 3.1.0
+info:
+  title: Dashboard API
+  version: 1.0.0
+  description: Dashboard data. Every endpoint requires the access_token cookie.
+paths:
+  /api/dashboard/summary:
+    get:
+      summary: Counters and recent activity for the dashboard home
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+        "401": { description: Not logged in }
+  /api/integrations/weather:
+    get:
+      summary: Proxy to the external weather API, cached for 10 minutes
+      parameters:
+        - { name: city, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Weather
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Weather" }
+        "502": { description: Upstream API failed }
+components:
+  schemas:
+    Summary:
+      type: object
+      properties:
+        projects: { type: integer }
+        open_tasks: { type: integer }
+        recent: { type: array, items: { type: string } }
+    Weather:
+      type: object
+      properties:
+        city: { type: string }
+        temp_c: { type: number }
+        condition: { type: string }

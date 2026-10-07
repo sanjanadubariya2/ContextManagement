@@ -1,0 +1,235 @@
+# Seed workspace for MultiPlayer-Context. Loaded by `mpc seed`.
+
+teams:
+  - { id: frontend, name: Frontend, write_root: frontend/ }
+  - { id: backend, name: Backend, write_root: backend/ }
+  - { id: testing, name: Testing, write_root: tests/ }
+
+members:
+  - { id: riya, name: Riya, team: frontend, seat: 1 }
+  - { id: aarav, name: Aarav, team: frontend, seat: 2 }
+  - { id: meera, name: Meera, team: frontend, seat: 3 }
+  - { id: sneha, name: Sneha, team: backend, seat: 1 }
+  - { id: rohan, name: Rohan, team: backend, seat: 2 }
+  - { id: ishaan, name: Ishaan, team: backend, seat: 3 }
+  - { id: kabir, name: Kabir, team: testing, seat: 1 }
+  - { id: tanvi, name: Tanvi, team: testing, seat: 2 }
+  - { id: dev, name: Dev, team: testing, seat: 3 }
+
+# Typed decision keys. For enums, each allowed value lists alias phrases used by
+# impact analysis to spot tasks that touch the key or contradict its value.
+decision_keys:
+  - key: project.stack.frontend
+    type: enum
+    global_spec: true
+    values: { nextjs: [next.js, nextjs], remix: [remix], vite_spa: [vite] }
+    keywords: [frontend, page, component, react, next]
+    description: Framework for the generated frontend.
+  - key: project.stack.backend
+    type: enum
+    global_spec: true
+    values: { fastapi: [fastapi], django: [django], express: [express] }
+    keywords: [backend, endpoint, api, route, server]
+    description: Framework for the generated backend.
+  - key: api.style
+    type: enum
+    global_spec: true
+    values: { rest_openapi: [rest, openapi], graphql: [graphql], trpc: [trpc] }
+    keywords: [api, endpoint, contract, openapi]
+    description: API style shared by frontend and backend.
+  - key: api.error_format
+    type: enum
+    values:
+      problem_json: [problem+json, problem json, rfc 7807]
+      plain_json_error: [error field, "{error:"]
+    keywords: [error, errors, 400, 401, 500, validation, invalid]
+    description: Error response body format.
+  - key: auth.mechanism
+    type: enum
+    values: { jwt: [jwt, json web token], server_session: [server session, session id] }
+    keywords: [auth, login, logout, token, session, refresh, me, password, credentials, sign]
+    description: How the backend represents an authenticated user.
+  - key: auth.token_transport
+    type: enum
+    values:
+      http_only_cookie: [cookie, httponly, http-only]
+      response_body: [response body, json body, return the token, token in the body]
+      authorization_header: [authorization header, bearer header, bearer token, localstorage, local storage]
+    keywords: [auth, login, logout, token, session, refresh, me, remember, credentials, sign]
+    description: How auth tokens travel between browser and backend.
+  - key: auth.password_hashing
+    type: enum
+    values: { argon2: [argon2], bcrypt: [bcrypt], sha256: [sha256, sha-256] }
+    owner_team: backend
+    keywords: [password, hash, register, signup, credentials]
+    description: Password hashing algorithm.
+  - key: auth.session_ttl_minutes
+    type: int
+    keywords: [session, ttl, expiry, expire, refresh, timeout, remember]
+    description: Access-token lifetime in minutes.
+  - key: db.engine
+    type: enum
+    global_spec: true
+    owner_team: backend
+    values: { postgres: [postgres, postgresql], mysql: [mysql], sqlite: [sqlite] }
+    keywords: [database, db, schema, table, migration, query]
+    description: Database for the generated site.
+  - key: ui.styling
+    type: enum
+    owner_team: frontend
+    values: { tailwind: [tailwind], css_modules: [css modules], styled_components: [styled-components] }
+    keywords: [style, styling, css, layout, color, design, button, form]
+    description: Styling approach for the frontend.
+  - key: ui.forms.library
+    type: enum
+    owner_team: frontend
+    values: { react_hook_form: [react-hook-form, react hook form], formik: [formik], native: [native form] }
+    keywords: [form, input, field, validation, submit, checkbox, toggle]
+    description: Form handling in the frontend.
+  - key: testing.backend_framework
+    type: enum
+    owner_team: testing
+    values: { pytest: [pytest], unittest: [unittest] }
+    keywords: [test, tests, testing, backend test, pytest]
+    description: Backend test framework.
+  - key: testing.e2e_framework
+    type: enum
+    owner_team: testing
+    values: { playwright: [playwright], cypress: [cypress] }
+    keywords: [e2e, end-to-end, browser test, playwright]
+    description: End-to-end test framework.
+  - key: ui.login.validation
+    type: enum
+    owner_team: frontend
+    values: { inline_errors: [inline error, under the field], toast: [toast], summary_banner: [banner] }
+    keywords: [login, validation, error, form, field]
+    description: How login form validation errors are shown (left open; Memorizer proposes it later).
+  - key: dashboard.refresh_seconds
+    type: int
+    owner_team: frontend
+    keywords: [dashboard, refresh, poll, polling, interval]
+    description: Dashboard polling interval.
+  - key: integrations.cache_ttl_seconds
+    type: int
+    owner_team: backend
+    keywords: [weather, integration, external, cache, upstream, proxy]
+    description: Cache lifetime for external API proxies.
+
+# Approved one at a time in this order. The seed baseline is v1, so these 13
+# approvals bring the Context Repo to v14, matching the plan's scenario.
+decisions:
+  - { key: project.stack.frontend, value: nextjs, team: frontend, by: [riya, aarav],
+      rationale: "Next.js gives file-based routing and SSR for the dashboard; the team already knows React." }
+  - { key: project.stack.backend, value: fastapi, team: backend, by: [sneha, rohan],
+      rationale: "FastAPI generates the OpenAPI schema from types, which keeps the contract and code in sync." }
+  - { key: api.style, value: rest_openapi, team: backend, by: [sneha, ishaan],
+      rationale: "REST with an OpenAPI contract is the simplest thing testers can write tests against." }
+  - { key: db.engine, value: postgres, team: backend, by: [rohan, ishaan],
+      rationale: "Postgres is already in the stack for the Context Manager; one database engine to run." }
+  - { key: api.error_format, value: problem_json, team: backend, by: [sneha, rohan],
+      rationale: "application/problem+json is a standard; the frontend can show the title and detail fields directly." }
+  - { key: auth.mechanism, value: jwt, team: backend, by: [sneha, rohan],
+      rationale: "Stateless JWTs avoid a session table; refresh tokens cover revocation well enough for this site." }
+  - { key: auth.token_transport, value: http_only_cookie, team: backend, by: [sneha, ishaan],
+      rationale: "HttpOnly cookies keep tokens out of JavaScript, so an XSS bug cannot steal them. The frontend never reads or stores a token; it sends requests with credentials included." }
+  - { key: auth.password_hashing, value: argon2, team: backend, by: [rohan, ishaan],
+      rationale: "argon2id is the current OWASP recommendation and is memory-hard." }
+  - { key: auth.session_ttl_minutes, value: 30, team: backend, by: [sneha, rohan],
+      rationale: "Thirty minutes matches the requirement; silent refresh keeps active users logged in." }
+  - { key: ui.styling, value: tailwind, team: frontend, by: [riya, meera],
+      rationale: "Tailwind keeps styles next to markup and matches the design notes' utility classes." }
+  - { key: ui.forms.library, value: react_hook_form, team: frontend, by: [aarav, meera],
+      rationale: "react-hook-form keeps inputs uncontrolled and validation declarative." }
+  - { key: testing.backend_framework, value: pytest, team: testing, by: [kabir, tanvi],
+      rationale: "pytest with FastAPI's TestClient needs no running server." }
+  - { key: testing.e2e_framework, value: playwright, team: testing, by: [tanvi, dev],
+      rationale: "Playwright's auto-waiting makes the login flow test far less flaky than alternatives." }
+
+# Starter-project contracts and the decision keys each one embodies.
+contracts:
+  - path: openapi/auth.yaml
+    linked_keys: [auth.mechanism, auth.token_transport, api.error_format, auth.session_ttl_minutes]
+    keywords: [auth, login, logout, refresh, token, me, session, password, credentials]
+  - path: openapi/dashboard.yaml
+    linked_keys: [api.error_format, integrations.cache_ttl_seconds]
+    keywords: [dashboard, summary, weather, integration, counters]
+
+tasks:
+  - { id: t20, team: backend, title: Implement the login API, created_by: sneha,
+      description: "POST /api/auth/login per openapi/auth.yaml: verify the password, set auth cookies, problem+json errors.",
+      files: [backend/app/auth/routes.py, backend/app/auth/tokens.py], contracts: [openapi/auth.yaml] }
+  - { id: t21, team: frontend, title: Build the login page, created_by: riya,
+      description: "Login form with field validation that calls the login API and redirects to the dashboard.",
+      files: [frontend/src/pages/Login.tsx, frontend/src/api/auth.ts], contracts: [openapi/auth.yaml] }
+  - { id: t22, team: testing, title: Test the login API, created_by: kabir,
+      description: "pytest coverage of /api/auth/login: success, wrong password, invalid email.",
+      files: [tests/backend/test_auth.py], contracts: [openapi/auth.yaml] }
+  - { id: t24, team: backend, title: Refresh-token rotation, created_by: sneha,
+      description: "Rotate the refresh token on every /api/auth/refresh call.",
+      files: [backend/app/auth/routes.py, backend/app/auth/tokens.py], contracts: [openapi/auth.yaml] }
+  - { id: t30, team: frontend, title: Dashboard auth redirect, created_by: aarav,
+      description: "Redirect unauthenticated visitors from /dashboard to /login.",
+      files: [frontend/src/pages/Dashboard.tsx, frontend/src/hooks/useSession.ts] }
+  - { id: t31, team: backend, title: Dashboard counters, created_by: rohan,
+      description: "Open-task counter and recent activity in /api/dashboard/summary.",
+      files: [backend/app/dashboard/routes.py], contracts: [openapi/dashboard.yaml] }
+  - { id: t32, team: testing, title: Weather integration tests, created_by: tanvi,
+      description: "Test the weather proxy's cache and its 502 when the upstream fails.",
+      files: [], contracts: [openapi/dashboard.yaml] }
+
+# Thread summaries (pgvector, team-scoped) and other non-code knowledge.
+knowledge:
+  - { kind: thread_summary, visibility: backend, author: memorizer:seed,
+      content: "Backend thread summary: Sneha argued for cookies over Authorization headers because the frontend would otherwise keep tokens in localStorage. Rohan worried about CSRF; the team settled on SameSite=Lax plus same-origin API routes. Ishaan will look at refresh-token rotation later (t24)." }
+  - { kind: thread_summary, visibility: frontend, author: memorizer:seed,
+      content: "Frontend thread summary: Riya will build the login page (t21) and Aarav the dashboard redirect (t30). Meera wants a show-password toggle. Everyone agreed the frontend never handles tokens: apiFetch sends credentials and /api/auth/me tells us who is logged in." }
+  - { kind: thread_summary, visibility: testing, author: memorizer:seed,
+      content: "Testing thread summary: Kabir owns the login API tests (t22), Tanvi the weather integration tests (t32), Dev the Playwright login flow. Tests are written from requirements and the OpenAPI contracts only." }
+  - { kind: test_failure, visibility: testing, author: tanvi,
+      content: "Test failure report (run 3): test_weather_upstream_down expected 502 from /api/integrations/weather when the upstream times out, got 500 because httpx.TimeoutException was not caught in an earlier build. Fixed in weather.py by catching httpx.HTTPError." }
+  - { kind: research, visibility: shared, author: researcher:seed,
+      content: "Research answer: SameSite=Lax cookies are sent on top-level navigations and same-site fetches, so a same-origin /api route works with credentials: 'include' and no CORS configuration. SameSite=None requires Secure." }
+
+# Scripted shared conversation: the "full history" baseline that every agent
+# would receive without the Context Manager. Channels: team:<id> or personal:<member>.
+conversation:
+  - { member: sneha, channel: team:backend, content: "Kicking off auth. I want JWTs, but where do they live in the browser? Cookie or Authorization header?" }
+  - { member: rohan, channel: team:backend, content: "Header is simpler for the API, but then the frontend keeps the token in localStorage, and any XSS can read it." }
+  - { member: ishaan, channel: team:backend, content: "Cookie with HttpOnly gets us out of that. We need SameSite and probably CSRF thinking though." }
+  - { member: sneha, channel: team:backend, content: "SameSite=Lax plus same-origin /api routes. No cross-site POSTs to worry about. I'll file the proposal." }
+  - { member: rohan, channel: team:backend, content: "Approved from me. Let's write the access TTL in too: 30 minutes per the requirements." }
+  - { member: riya, channel: team:frontend, content: "Backend went with HttpOnly cookies, so we never see the token. apiFetch just needs credentials: 'include'." }
+  - { member: aarav, channel: team:frontend, content: "Then how does the UI know who is logged in? Call /api/auth/me on load?" }
+  - { member: riya, channel: team:frontend, content: "Yes, useSession wraps that. I'll take the login page, t21." }
+  - { member: meera, channel: team:frontend, content: "Can I add a show-password toggle to the login form? Design notes don't mention it but it's standard." }
+  - { member: aarav, channel: team:frontend, content: "Sure, after Riya's first pass so we don't fight over Login.tsx." }
+  - { member: kabir, channel: team:testing, content: "I'll write the login API tests from the contract: 204 on success, 401 on wrong password, 400 on invalid email." }
+  - { member: tanvi, channel: team:testing, content: "Weather proxy tests are mine. I want to fake the upstream with respx and check the 10 minute cache." }
+  - { member: dev, channel: team:testing, content: "Playwright for the login flow. I'll seed a demo user and assert we land on /dashboard." }
+  - { member: sneha, channel: personal:sneha, content: "Draft the login endpoint: verify the argon2 hash, then set access and refresh cookies." }
+  - { member: sneha, channel: personal:sneha, role: assistant, content: "Plan: LoginRequest validates email and password length; find_user_by_email then verify_password; on success set_auth_cookies with a 30-minute access token and a 7-day refresh token; on failure 401 problem+json." }
+  - { member: rohan, channel: personal:rohan, content: "What should the dashboard summary return for a user with no projects?" }
+  - { member: rohan, channel: personal:rohan, role: assistant, content: "Return zeros and an empty recent list with 200, not 404: the dashboard still renders, which matches the requirement that it shows counters." }
+  - { member: riya, channel: personal:riya, content: "Sketch the login page component with error handling." }
+  - { member: riya, channel: personal:riya, role: assistant, content: "LoginPage keeps email, password, error and busy state; onSubmit calls login() from api/auth, pushes /dashboard on success and shows ApiError.message under the form otherwise. The submit button is disabled while busy." }
+  - { member: ishaan, channel: team:backend, content: "Refresh-token rotation: should we rotate on every refresh or only near expiry? Rotation on every call makes theft detection possible." }
+  - { member: sneha, channel: team:backend, content: "Every call. Park it as t24, it's not blocking login." }
+  - { member: meera, channel: team:frontend, content: "Validation errors: inline under each field or a banner at the top? I prefer inline." }
+  - { member: riya, channel: team:frontend, content: "Inline. The design notes say messages appear under the field." }
+  - { member: aarav, channel: team:frontend, content: "Agreed, inline errors. Someone should make that an actual decision so the agents follow it." }
+  - { member: kabir, channel: team:testing, content: "Question for the record: the contract says 400 for invalid email. If the backend returns 422 from FastAPI's default validation we should flag it." }
+  - { member: tanvi, channel: team:testing, content: "Good catch. FastAPI returns 422 by default; they need an exception handler to map it to 400 problem+json." }
+  - { member: rohan, channel: team:backend, content: "Noted on 400 vs 422. I'll add a RequestValidationError handler that emits problem+json with status 400." }
+  - { member: ishaan, channel: team:backend, content: "Weather proxy: cache TTL 600 seconds, and catch httpx.HTTPError so we return 502 rather than 500." }
+  - { member: dev, channel: team:testing, content: "For the e2e run I need a seeded user. Backend, can you expose a fixture or should I insert into users directly?" }
+  - { member: sneha, channel: team:backend, content: "Insert directly in the test DB; we don't want a seeding endpoint in the API." }
+  - { member: aarav, channel: personal:aarav, content: "How do I redirect from the dashboard if the user is not logged in?" }
+  - { member: aarav, channel: personal:aarav, role: assistant, content: "In DashboardPage, once useSession finishes loading, call router.replace('/login') when user is null. Avoid rendering the counters until then to prevent a flash of content." }
+  - { member: meera, channel: personal:meera, content: "Is a cookie sent with fetch by default?" }
+  - { member: meera, channel: personal:meera, role: assistant, content: "Same-origin fetch sends cookies by default (credentials: 'same-origin'). apiFetch sets credentials: 'include' anyway, which also covers a separate API origin." }
+  - { member: rohan, channel: team:backend, content: "Dashboard counters next (t31). Open tasks will need a tasks table; I'll add it to models.py." }
+  - { member: kabir, channel: personal:kabir, content: "List the cases I should cover for POST /api/auth/login." }
+  - { member: kabir, channel: personal:kabir, role: assistant, content: "From the contract: 204 with Set-Cookie on valid credentials; 401 problem+json on a wrong password; 401 on an unknown email; 400 problem+json on a malformed email; 400 when the password is under 8 characters." }
+  - { member: tanvi, channel: team:testing, content: "Weather tests pass locally now that 502 is returned. Writing them up." }
+  - { member: riya, channel: team:frontend, content: "Login page first pass is done locally; I'll request review once the API is up." }
+  - { member: sneha, channel: team:backend, content: "Login API is merged behind the contract. Frontend can integrate." }

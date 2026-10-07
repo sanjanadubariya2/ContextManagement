@@ -1,0 +1,75 @@
+openapi: 3.1.0
+info:
+  title: Auth API
+  version: 1.0.0
+  description: >
+    Authentication for the starter site. Access tokens are JWTs and travel in an
+    HttpOnly cookie named `access_token`; they are never returned in a response body.
+paths:
+  /api/auth/login:
+    post:
+      summary: Log in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "204":
+          description: Logged in. Sets the access_token and refresh_token cookies.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: access_token=<jwt>; HttpOnly; Secure; SameSite=Lax; Path=/
+        "400":
+          description: Malformed request (for example an invalid email)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401":
+          description: Wrong email or password
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /api/auth/logout:
+    post:
+      summary: Clear the auth cookies
+      responses:
+        "204": { description: Logged out }
+  /api/auth/refresh:
+    post:
+      summary: Exchange the refresh_token cookie for a new access_token cookie
+      responses:
+        "204": { description: Refreshed }
+        "401": { description: Refresh token missing or expired }
+  /api/auth/me:
+    get:
+      summary: The current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { description: Not logged in }
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
