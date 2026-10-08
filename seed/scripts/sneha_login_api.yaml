@@ -1,0 +1,142 @@
+# Increment 3 gate: Sneha's login-API request runs end to end from the CLI
+# and promotes its files to a new version.
+#   uv run mpc run-script seed/scripts/sneha_login_api.yaml
+# Steps replay the LLM's tool calls offline; everything else (ticket, context
+# package, scoped tools, validation, staleness check, promotion, re-embedding,
+# trace) is the real runtime.
+name: Sneha's login API (t20)
+member: sneha
+task: t20
+request: >-
+  Implement the login API per openapi/auth.yaml. Errors must be problem+json,
+  and a malformed request (for example an invalid email) must return 400, not 422.
+expect:
+  action: delegate
+  status: completed
+  promoted: [backend/app/errors.py, backend/app/main.py, backend/app/auth/routes.py]
+
+steps:
+  personal:
+    - tool: delegate
+      input:
+        task_id: t20
+        instructions: >-
+          Implement POST /api/auth/login exactly as openapi/auth.yaml specifies. Every error
+          response must be application/problem+json, and request validation failures must
+          return 400 instead of FastAPI's default 422. Keep auth on the existing cookie helpers.
+
+  worker:
+    - tool: read_file
+      input: {path: backend/app/auth/routes.py}
+    - tool: read_file
+      input: {path: backend/app/main.py}
+    - tool: request_more_context
+      input: {query: problem+json error responses and request validation}
+    - tool: write_file
+      input:
+        path: backend/app/errors.py
+        content: |
+          """application/problem+json errors for every API failure (see openapi/*.yaml)."""
+
+          from fastapi import FastAPI, Request
+          from fastapi.exceptions import RequestValidationError
+          from fastapi.responses import JSONResponse
+          from starlette.exceptions import HTTPException as StarletteHTTPException
+
+          PROBLEM = "application/problem+json"
+
+
+          def problem(status: int, title: str, detail: str = "") -> JSONResponse:
+              body = {"type": "about:blank", "title": title, "status": status}
+              if detail:
+                  body["detail"] = detail
+              return JSONResponse(body, status_code=status, media_type=PROBLEM)
+
+
+          async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+              return problem(exc.status_code, str(exc.detail))
+
+
+          async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+              # The contract promises 400 (not FastAPI's default 422) for malformed requests.
+              fields = ", ".join(".".join(str(p) for p in e["loc"][1:]) for e in exc.errors())
+              return problem(400, "Invalid request", f"Invalid fields: {fields}")
+
+
+          def install(app: FastAPI) -> None:
+              app.add_exception_handler(StarletteHTTPException, http_error)
+              app.add_exception_handler(RequestValidationError, validation_error)
+    - tool: write_file
+      input:
+        path: backend/app/main.py
+        content: |
+          """FastAPI entry point for the starter site."""
+
+          from fastapi import FastAPI
+
+          from app.auth.routes import router as auth_router
+          from app.dashboard.routes import router as dashboard_router
+          from app.errors import install as install_error_handlers
+          from app.integrations.weather import router as weather_router
+
+          app = FastAPI(title="Starter site")
+          install_error_handlers(app)
+          app.include_router(auth_router, prefix="/api/auth")
+          app.include_router(dashboard_router, prefix="/api/dashboard")
+          app.include_router(weather_router, prefix="/api/integrations")
+    - tool: write_file
+      input:
+        path: backend/app/auth/routes.py
+        content: |
+          """Auth endpoints. Tokens travel only in HttpOnly cookies; errors are problem+json."""
+
+          from fastapi import APIRouter, Cookie, HTTPException, Response
+
+          from app.auth.schemas import LoginRequest, UserOut
+          from app.auth.tokens import (
+              clear_auth_cookies,
+              create_access_token,
+              create_refresh_token,
+              decode_token,
+              set_auth_cookies,
+          )
+          from app.db.models import find_user_by_email, verify_password
+
+          router = APIRouter()
+
+
+          @router.post("/login", status_code=204)
+          def login(body: LoginRequest, response: Response) -> None:
+              """204 with auth cookies; 401 problem+json on bad credentials (see app.errors)."""
+              user = find_user_by_email(body.email)
+              if user is None or not verify_password(user, body.password):
+                  raise HTTPException(status_code=401, detail="Wrong email or password")
+              set_auth_cookies(response, create_access_token(user.id), create_refresh_token(user.id))
+
+
+          @router.post("/logout", status_code=204)
+          def logout(response: Response) -> None:
+              clear_auth_cookies(response)
+
+
+          @router.post("/refresh", status_code=204)
+          def refresh(response: Response, refresh_token: str | None = Cookie(default=None)) -> None:
+              # TODO(t24): rotate refresh tokens.
+              if not refresh_token:
+                  raise HTTPException(status_code=401, detail="Missing refresh token")
+              claims = decode_token(refresh_token)
+              set_auth_cookies(response, create_access_token(claims["sub"]), refresh_token)
+
+
+          @router.get("/me", response_model=UserOut)
+          def me(access_token: str | None = Cookie(default=None)) -> UserOut:
+              if not access_token:
+                  raise HTTPException(status_code=401, detail="Not logged in")
+              claims = decode_token(access_token)
+              return UserOut(id=claims["sub"], email=claims.get("email", "unknown@example.com"))
+    - tool: finish
+      input:
+        summary: >-
+          POST /api/auth/login now matches openapi/auth.yaml: 204 with cookies on success, and
+          every error is problem+json. A RequestValidationError handler maps malformed requests
+          (e.g. an invalid email) to 400 instead of 422, installed in main.py via app/errors.py.

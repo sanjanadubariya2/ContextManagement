@@ -1,6 +1,7 @@
 """mpc: headless driver for MultiPlayer-Context (Increments 1-2)."""
 
 import json
+import sys
 from typing import Optional
 
 import typer
@@ -10,7 +11,7 @@ from sqlalchemy import func, select
 
 from mpc import db, redis_store
 from mpc.config import get_settings
-from mpc.llm import get_adapter
+from mpc.llm import LLMConfigError, get_adapter, model_for, resolve_provider
 from mpc.llm.embeddings import get_embedder
 
 app = typer.Typer(no_args_is_help=True, help="MultiPlayer-Context command line.")
@@ -18,6 +19,10 @@ decision_app = typer.Typer(no_args_is_help=True, help="Decision registry.")
 artifact_app = typer.Typer(no_args_is_help=True, help="Versioned artifact store.")
 app.add_typer(decision_app, name="decision")
 app.add_typer(artifact_app, name="artifact")
+# A piped Windows console is cp1252; replace what it can't encode rather than crash.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="replace")
 console = Console()
 
 
@@ -88,8 +93,12 @@ def status():
     pg, r = db.ping(), _redis()
     s = get_settings()
     console.print(f"Postgres: {'up' if pg else 'DOWN'}   Redis: {'up' if r else 'DOWN'}")
-    adapter = get_adapter()
-    console.print(f"LLM: {adapter.provider} ({adapter.model})   Embeddings: {s.embed_provider}")
+    try:
+        provider, why = resolve_provider()
+        model = model_for(provider)
+        console.print(f"LLM: {provider} ({model}) - {why}   Embeddings: {s.embed_provider}")
+    except LLMConfigError as e:
+        console.print(f"[red]LLM: {e}[/]")
     if not pg:
         raise typer.Exit(1)
     with db.session_scope() as sess:
@@ -128,23 +137,148 @@ def members():
 # -------------------------------------------------------------- agents
 
 
-@app.command()
-def ask(member: str, text: str):
-    """Send one message to a member's personal agent."""
-    from mpc.chat import ask as do_ask
+def _turn(member: str, text: str, task: Optional[str], script: Optional[dict]):
+    from mpc.agents.personal import run_turn
+    from mpc.agents.runtime import Adapters
+    from mpc.models import Task
 
-    adapter = get_adapter()
+    adapters = Adapters.from_script(script) if script else Adapters()
     with db.session_scope() as s:
-        _member(s, member)
-        res = do_ask(s, _redis(), adapter, get_embedder(), member, text)
-    c = res.completion
-    console.print(c.text, markup=False, highlight=False)
+        m = _member(s, member)
+        if task and s.get(Task, task) is None:
+            console.print(f"[red]No task {task!r}.[/] Run `mpc tasks` to list them.")
+            raise typer.Exit(1)
+        res = run_turn(s, _redis(), get_embedder(), adapters, m, text, task_id=task)
+    console.print(res.reply, markup=False, highlight=False)
+    provider = "script" if script else adapters.for_role("personal").provider
     console.print(
-        f"[dim]{c.provider}/{c.model} · in {c.input_tokens} · out {c.output_tokens} · "
-        f"stop {c.stop_reason} · brief {res.brief.tokens} tokens at v{res.brief.ctx_version}[/]"
+        f"[dim]action {res.action} · {provider} · {res.llm_calls} personal-agent calls "
+        f"(in {res.input_tokens}, out {res.output_tokens}) · brief {res.brief_tokens} tokens at "
+        f"v{res.ctx_version}[/]"
     )
-    if c.refusal_category:
-        console.print(f"[yellow]Refused ({c.refusal_category}).[/]")
+    return res
+
+
+@app.command()
+def ask(
+    member: str,
+    text: str,
+    task: Optional[str] = typer.Option(None, "--task", help="Task id, e.g. t20."),
+    script: Optional[str] = typer.Option(None, "--script", help="Replay planned steps offline."),
+):
+    """One request to a member's personal agent (it may answer, edit, delegate or request review).
+
+    Slash commands override its choice: /delegate, /review, /do-it-yourself.
+    """
+    from mpc.agents.runtime import load_script
+
+    _turn(member, text, task, load_script(script) if script else None)
+
+
+@app.command("run-script")
+def run_script(path: str):
+    """Run a scripted scenario end to end and check its expectations."""
+    from mpc.agents.runtime import load_script
+    from mpc.context.artifacts import current_versions
+
+    sc = load_script(path)
+    console.print(f"[bold]{sc.get('name', path)}[/]: {sc['member']} asks {sc['request']!r}")
+    res = _turn(sc["member"], sc["request"], sc.get("task"), sc)
+    exp = sc.get("expect") or {}
+    run = res.result
+    checks: list[tuple[str, bool]] = []
+    if "action" in exp:
+        checks.append((f"action is {exp['action']}", res.action == exp["action"]))
+    if "status" in exp:
+        checks.append((f"run status is {exp['status']}", bool(run) and run.status == exp["status"]))
+    if "verdict" in exp:
+        checks.append((f"review verdict is {exp['verdict']}", bool(run) and run.verdict == exp["verdict"]))
+    if "promoted" in exp:
+        with db.session_scope() as s:
+            now = current_versions(s, list(exp["promoted"]))
+        for p in exp["promoted"]:
+            ok = bool(run) and p in run.files and now.get(p) == run.files[p]
+            checks.append((f"{p} promoted (now v{now.get(p)})", ok))
+    if "bugs" in exp:
+        checks.append((f"{exp['bugs']} bug task(s) filed", bool(run) and len(run.bugs) == exp["bugs"]))
+    for label, ok in checks:
+        console.print(f"  {'[green]PASS[/]' if ok else '[red]FAIL[/]'} {label}")
+    if not all(ok for _, ok in checks):
+        raise typer.Exit(1)
+
+
+@app.command()
+def tasks(team: Optional[str] = typer.Option(None, "--team")):
+    """The task boards."""
+    from mpc.models import Task
+
+    with db.session_scope() as s:
+        q = select(Task).order_by(Task.team_id, Task.id)
+        if team:
+            q = q.where(Task.team_id == team)
+        t = Table("id", "team", "status", "claimed by", "title", "created by")
+        for x in s.scalars(q):
+            t.add_row(x.id, x.team_id, x.status, x.claimed_by or "", x.title, x.created_by)
+        console.print(t)
+
+
+@app.command()
+def instances(limit: int = typer.Option(20, "--limit")):
+    """Recent subagent runs."""
+    from mpc.models import InstanceRun
+
+    with db.session_scope() as s:
+        t = Table("run", "instance", "status", "try", "v", "files", "steps", "tokens in/out")
+        for x in s.scalars(select(InstanceRun).order_by(InstanceRun.id.desc()).limit(limit)):
+            files = ", ".join(f"{p.rsplit('/', 1)[-1]}@{v}" for p, v in (x.files or {}).items())
+            t.add_row(str(x.id), x.instance_id, x.status, str(x.attempt), f"v{x.ctx_version}" if x.ctx_version else "",
+                      files, str(x.steps), f"{x.input_tokens}/{x.output_tokens}")
+        console.print(t)
+
+
+@app.command()
+def instance(run_id: int):
+    """One subagent run in full."""
+    from mpc.models import InstanceRun
+
+    with db.session_scope() as s:
+        x = s.get(InstanceRun, run_id)
+        if x is None:
+            console.print(f"[red]No run #{run_id}.[/]")
+            raise typer.Exit(1)
+        data = {c.name: getattr(x, c.name) for c in InstanceRun.__table__.columns}
+    console.print_json(json.dumps(data, default=str))
+
+
+@app.command()
+def reviews(limit: int = typer.Option(10, "--limit")):
+    """Recent reviews and their comments."""
+    from mpc.models import Review, ReviewComment
+
+    with db.session_scope() as s:
+        for rv in s.scalars(select(Review).order_by(Review.id.desc()).limit(limit)):
+            console.print(f"[bold]Review #{rv.id}[/] {rv.verdict} · {', '.join(rv.paths)} · requested by {rv.requested_by}")
+            if rv.summary:
+                console.print(f"  {rv.summary}", markup=False)
+            for c in s.scalars(select(ReviewComment).where(ReviewComment.review_id == rv.id).order_by(ReviewComment.id)):
+                where = f"{c.path}:{c.line}" if c.line else (c.path or "")
+                console.print(f"  [{c.source}] {where} {c.body}", markup=False)
+
+
+@app.command("run-tests")
+def run_tests_cmd(paths: list[str] = typer.Argument(None, help="Paths under tests/.")):
+    """Run tests against the current code in the sandboxed runner."""
+    from mpc.models import TestRun
+    from mpc.testing.runner import run_tests
+
+    with db.session_scope() as s:
+        res = run_tests(s, paths or ["tests"])
+        s.add(TestRun(paths=res.paths, exit_code=res.exit_code, passed=res.passed, failed=res.failed,
+                      errors=res.errors, timed_out=res.timed_out, duration_ms=res.duration_ms, output=res.output))
+    console.print(res.output, markup=False, highlight=False)
+    console.print(f"[bold]{res.summary()}[/] in {res.duration_ms} ms")
+    if not res.ok:
+        raise typer.Exit(1)
 
 
 # ------------------------------------------------------- context manager
@@ -504,5 +638,67 @@ def artifact_put(
         console.print(f"{path} is now v{art.version}: {stats.chunks} chunks, {stats.redactions} redactions.")
 
 
+@app.command("llm-check")
+def llm_check():
+    """Make one tiny real call to the configured LLM and report the result."""
+    try:
+        provider, why = resolve_provider()
+        adapter = get_adapter()
+    except LLMConfigError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
+    console.print(f"Provider: {provider} ({why}), model {adapter.model}")
+    if provider == "fake":
+        console.print("[yellow]The fake provider is active (MPC_LLM_PROVIDER=fake); no live call made.[/]")
+        raise typer.Exit(1)
+    try:
+        c = adapter.complete([{"role": "user", "content": "Reply with the single word OK."}], max_tokens=1024)
+    except Exception as e:  # provider SDK errors, translated below
+        console.print(f"[red]{_explain_llm_error(provider, adapter.model, e)}[/]")
+        raise typer.Exit(1)
+    if c.stop_reason == "refusal":
+        console.print(f"[yellow]The model declined ({c.refusal_category}); the key and model work.[/]")
+        return
+    console.print(f"[green]OK[/]: {c.model} replied {c.text.strip()!r} "
+                  f"(in {c.input_tokens}, out {c.output_tokens}, stop {c.stop_reason})")
+
+
+def _explain_llm_error(provider: str, model: str, e: Exception) -> str:
+    if provider == "gemini":
+        from google.genai import errors as gerr
+
+        if isinstance(e, gerr.APIError):
+            msg = (e.message or "").strip()
+            if e.code in (400, 401, 403) and "key" in msg.lower():
+                return f"The Gemini API key was rejected ({e.code}): {msg}"
+            if e.code == 404:
+                return f"Model {model!r} was not found (404). Set MPC_GEMINI_MODEL. {msg}"
+            if e.code == 429:
+                return f"Quota or rate limit hit (429); the key works. {msg}"
+            return f"Gemini API error {e.code}: {msg}"
+        return f"Could not reach the Gemini API: {e}"
+    import anthropic
+
+    if isinstance(e, anthropic.AuthenticationError):
+        return "The Anthropic API key was rejected (401)."
+    if isinstance(e, anthropic.NotFoundError):
+        return f"Model {model!r} was not found (404). Set MPC_LLM_MODEL."
+    if isinstance(e, anthropic.RateLimitError):
+        return "Rate limited (429); the key works."
+    if isinstance(e, anthropic.APIStatusError):
+        return f"Anthropic API error {e.status_code}: {e.message}"
+    if isinstance(e, anthropic.APIConnectionError):
+        return "Could not reach the Anthropic API (network or proxy)."
+    return f"{type(e).__name__}: {e}"
+
+
+def main() -> None:
+    try:
+        app()
+    except LLMConfigError as e:
+        console.print(f"[red]{e}[/]")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
-    app()
+    main()

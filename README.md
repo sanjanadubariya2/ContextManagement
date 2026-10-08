@@ -2,8 +2,8 @@
 
 Nine developers in three teams, each with a personal agent, building one website while a
 central Context Manager decides what every agent knows. This repository implements
-**Increment 1 (foundations)** and **Increment 2 (Context Manager core)** of the plan. Both
-run headless and are driven from the `mpc` CLI.
+**Increment 1 (foundations)**, **Increment 2 (Context Manager core)** and **Increment 3
+(agents on the Context Manager)** of the plan. All run headless and are driven from the `mpc` CLI.
 
 ## Setup
 
@@ -17,22 +17,32 @@ uv run mpc status
 `mpc init --reset` wipes and reseeds. Settings come from `MPC_*` environment variables or
 `.env` (see `.env.example`).
 
-**LLM.** With `MPC_LLM_PROVIDER=auto` (default), the Anthropic adapter is used when credentials
-exist (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile). Otherwise a
-deterministic offline `fake` provider is used. The default model is `claude-opus-5-5` with effort
-`medium` and server-side refusal fallbacks on. The small model for Researcher/Memorizer is
-`claude-haiku-4-5`. Which provider and budget to use is still the plan's open question; the
-adapter (`complete`, `tool_call`, `embed`) keeps that swappable.
+**LLM.** Gemini or Claude, behind one adapter interface (`complete`, `tool_call`, `embed`).
+`MPC_LLM_PROVIDER=gemini` uses the Gemini API through Google's `google-genai` SDK with
+`GEMINI_API_KEY` (default model `gemini-3.8-flash`; `MPC_GEMINI_MODEL=gemini-3.1-pro-preview` for
+the stronger preview model). `MPC_LLM_PROVIDER=anthropic` uses Claude with `ANTHROPIC_API_KEY`
+(default `claude-opus-5-5`). `auto`, the default, picks Gemini when its key is set, else Claude.
+There is no silent fallback: with no usable key the CLI stops and names what is missing. The
+offline `fake` provider runs only when `MPC_LLM_PROVIDER=fake` is set, as the tests do.
+
+Keys go in `.env` (saved) or the shell; the shell wins. `uv run mpc status` shows the active
+provider and why, and `uv run mpc llm-check` makes one tiny live call and names the problem if it
+fails (key rejected, model not found, quota).
 
 **Embeddings.** Default `hash`: deterministic, offline, lexical feature hashing, so experiments
-are repeatable and cost nothing. `MPC_EMBED_PROVIDER=voyage` (`uv sync --extra voyage`) gives
-semantic embeddings. Both produce 1024-d vectors.
+are repeatable and cost nothing. `MPC_EMBED_PROVIDER=gemini` uses `gemini-embedding-001` (same
+key) for semantic retrieval; `voyage` is also available. All produce 1024-d vectors. After
+switching, rebuild with `uv run mpc init --reset -y` so every chunk uses the same embedder.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `mpc ask sneha "..."` | One turn with Sneha's personal agent through the adapter; conversation in Postgres, recent turns in Redis, orientation brief in the system prompt |
+| `mpc ask sneha "..." [--task t20]` | One request to Sneha's personal agent: it answers, makes a small edit, delegates to a Worker or requests a review. `/delegate`, `/review`, `/do-it-yourself` override its choice; `--script` replays planned steps offline |
+| `mpc run-script seed/scripts/<name>.yaml` | Run a scripted scenario end to end and check its expectations (PASS/FAIL) |
+| `mpc instances` / `mpc instance 3` | Subagent runs: status, attempt, packed version, promoted files, tokens |
+| `mpc reviews` / `mpc tasks [--team backend]` | Reviews with their comments / the task boards |
+| `mpc run-tests tests/backend` | Run tests against the current code in the sandboxed runner |
 | `mpc context sneha "implement login API" --task t20` | Build a context package and print it with its trace (`--show` renders it, `--json` dumps it, `--mode`, `--budget`) |
 | `mpc brief aarav "..."` / `mpc impact aarav "..."` | Orientation brief / impact analysis |
 | `mpc trace 12` / `mpc stale 12` | Inspect a stored trace / staleness-check it against the current repo |
@@ -40,6 +50,22 @@ semantic embeddings. Both produce 1024-d vectors.
 | `mpc artifact list \| show \| put` | Versioned artifact store (`put` writes a draft and promotes it) |
 | `mpc measure` | Increment 2 measurement → `results/increment2_package_size.{md,csv}` |
 | `mpc members`, `mpc index`, `mpc migrate` | Housekeeping |
+
+## Scenarios (offline, repeatable)
+
+Scripts in `seed/scripts/` replay the LLM's tool calls; everything else is the real runtime. Run
+them in this order on a fresh workspace (`uv run mpc init --reset -y`):
+
+```sh
+uv run mpc run-script seed/scripts/kabir_login_tests.yaml   # Testing worker finds 422-vs-400, files bug t33
+uv run mpc run-script seed/scripts/sneha_login_api.yaml     # Increment 3 gate: login API, files promoted
+uv run mpc run-tests tests/backend/test_login_contract.py   # Kabir's tests now pass
+uv run mpc run-script seed/scripts/riya_login_page.yaml     # a Worker stores the token in localStorage...
+uv run mpc run-script seed/scripts/riya_review.yaml         # ...and the isolated Reviewer catches it
+```
+
+With `ANTHROPIC_API_KEY` set, the same requests work unscripted:
+`uv run mpc ask sneha "Implement the login API per openapi/auth.yaml" --task t20`.
 
 ## What is built
 
@@ -72,10 +98,34 @@ artifact store. Also: the 9 members as fixtures, the LLM adapter and the Typer C
 Gate: **passes.** `mpc measure` pins every required approved decision on all 10 scripted tasks,
 including three trap tasks, and stays under budget with a trace row each. The tests assert that
 approved decisions are always pinned, the budget is never exceeded, and superseded chunks are
-never returned:
+never returned.
+
+**Increment 3** (`src/mpc/agents`, `src/mpc/testing`):
+
+- `personal.py`: one personal agent per member as a LangGraph graph
+  (intake → orient → decide → answer | edit | delegate | review). The decide node's tool call is
+  the only LLM choice; slash commands override it. The conversation is stored in Postgres with
+  recent turns in Redis, and the orientation brief rides in the system prompt.
+- `templates.py`: Worker and Reviewer, one variant per team (write paths, skills, review
+  criteria). Workers are curated forks; Testing workers and all Reviewers are isolated.
+- `runtime.py`: the execution runtime. Instances get IDs such as `worker:be-sneha:t20`, a draft
+  workspace in the artifact store, and scoped file tools (`list_files`, `read_file`, `write_file`,
+  `request_more_context`). Writes outside the template's paths, secret files and path escapes are
+  refused. Write-back validates syntax (an invalid result loops back to the instance), runs the
+  staleness check (a stale result is discarded and re-run once on the new version), promotes
+  drafts (re-embedding them), files proposals and records the run in `instance_runs`. Reviews
+  combine the Reviewer's comments with a deterministic pre-check that flags lines contradicting
+  approved decisions.
+- `testing/runner.py`: Testing workers run pytest on a temporary copy of the code plus their
+  drafts, in a subprocess with a timeout, with only an allowlist of OS environment variables and
+  no secret files. Results go to `test_runs`; `report_bug` puts a task on the owning team's board.
+
+Gate: **passes.** `mpc run-script seed/scripts/sneha_login_api.yaml` runs Sneha's request end to
+end and promotes `backend/app/main.py` and `backend/app/auth/routes.py` to v2 (and the new
+`backend/app/errors.py` to v1).
 
 ```sh
-uv run pytest      # 82 tests; DB tests use the separate mpc_test database and Redis db 1
+uv run pytest      # 107 tests; DB tests use the separate mpc_test database and Redis db 1
 ```
 
 ## Deliberate choices and limits
@@ -83,6 +133,14 @@ uv run pytest      # 82 tests; DB tests use the separate mpc_test database and R
 - **Tickets are drafts.** The policy guard that issues admitted tickets is Increment 4. Until then
   the CLI builds an unadmitted `draft_ticket` with the same shape, and the Context Manager
   enforces its visibility, budget and expiry.
+- **No admission control yet.** The two-Worker cap, file leases, atomic task claims and diff
+  validation against decisions belong to the policy guard (Increment 4). The runtime already
+  enforces write paths, and honours `leases` once a ticket carries them.
+- **Scripts stand in for the LLM offline.** `riya_login_page.yaml` makes a deliberate mistake so
+  the review scenario has something to catch. Live Claude runs need `ANTHROPIC_API_KEY`; the
+  adapter's request shape is unit-tested against a stubbed SDK client.
+- **Python tests only.** The runner executes pytest; Playwright end-to-end tests need a running
+  site and come with the live session.
 - **Approval has no quorum yet.** `registry.approve` is the primitive that governance (2-of-3,
   Conflict Cards, votes) will call in Increment 4.
 - **Tokens are estimated** as `ceil(chars/4)`, offline and deterministic. The budget invariant

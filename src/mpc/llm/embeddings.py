@@ -82,9 +82,14 @@ class VoyageEmbedder:
         return out
 
 
-def get_embedder() -> HashEmbedder | VoyageEmbedder:
-    if get_settings().embed_provider == "voyage":
+def get_embedder():
+    provider = get_settings().embed_provider
+    if provider == "voyage":
         return VoyageEmbedder()
+    if provider == "gemini":
+        from mpc.llm.gemini_provider import GeminiEmbedder
+
+        return GeminiEmbedder()
     return HashEmbedder()
 
 

@@ -20,7 +20,7 @@ def test_ask_goes_through_adapter_and_is_stored(ws):
         before = s.scalar(select(func.count()).select_from(Message))
     res = runner.invoke(app, ["ask", "sneha", "What's left for the login endpoint?"])
     assert res.exit_code == 0, res.output
-    assert "fake reply" in res.output and "fake/fake-1" in res.output
+    assert "fake reply" in res.output and "action answer" in res.output
     with db.session_scope() as s:
         assert s.scalar(select(func.count()).select_from(Message)) == before + 2
     r, _ = ws

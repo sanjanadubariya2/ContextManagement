@@ -22,7 +22,7 @@ from mpc.context.packager import (
 from mpc.context.packing import TaskTooBig
 from mpc.context.repo import current_version
 from mpc.context.visibility import draft_ticket
-from mpc.models import Chunk, ContextTrace, Decision, Member, Task
+from mpc.models import Chunk, ContextRepoVersion, ContextTrace, Decision, Member, Task
 from mpc.redis_store import CTX_VERSION
 from mpc.tokens import estimate_tokens
 
@@ -47,11 +47,13 @@ def _build(s, r, emb, member_id, text, task_id=None, budget=12000, **kw):
 
 
 def test_seed_reaches_v14_and_redis_agrees(ws):
+    """The seed's 13 approvals land on v14; later tests may add versions on top."""
     r, _ = ws
     with db.session_scope() as s:
-        assert current_version(s) == 14
-        assert registry.get_approved(s, "auth.token_transport").value == "http_only_cookie"
-    assert r.get(CTX_VERSION) == "14"
+        assert registry.snapshot(s, 14)["auth.token_transport"] == "http_only_cookie"
+        assert len(registry.snapshot(s, 14)) == 13
+        assert s.get(ContextRepoVersion, 14).changed_keys == ["testing.e2e_framework"]
+        assert r.get(CTX_VERSION) == str(current_version(s))
 
 
 @pytest.mark.parametrize("member_id,text,task_id", REQUESTS)

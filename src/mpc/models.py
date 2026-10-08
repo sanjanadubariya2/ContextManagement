@@ -171,7 +171,7 @@ class Artifact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     path: Mapped[str] = mapped_column(String)
     version: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String)  # draft | current | superseded
+    status: Mapped[str] = mapped_column(String)  # draft | current | superseded | discarded
     content: Mapped[str] = mapped_column(Text)
     language: Mapped[str] = mapped_column(String, default="text")
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
@@ -224,4 +224,74 @@ class ContextTrace(Base):
     dependencies: Mapped[dict] = mapped_column(JSONB)
     package_hash: Mapped[str] = mapped_column(String)
     cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = _now()
+
+
+# ------------------------------------------------------------ agents (Increment 3)
+
+
+class InstanceRun(Base):
+    """One run of one subagent instance (a re-run after staleness is a new attempt)."""
+
+    __tablename__ = "instance_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String)  # worker:be-sneha:t20
+    template: Mapped[str] = mapped_column(String)  # backend_worker
+    mode: Mapped[str] = mapped_column(String)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"))
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    ticket: Mapped[dict] = mapped_column(JSONB)
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String)  # running | completed | stale | invalid | failed
+    trace_id: Mapped[int | None] = mapped_column(ForeignKey("context_traces.id"), nullable=True)
+    ctx_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[dict] = mapped_column(JSONB, default=dict)  # path -> promoted version
+    proposals: Mapped[list[int]] = mapped_column(ARRAY(Integer), default=list)
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("instance_runs.id"))
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    requested_by: Mapped[str] = mapped_column(ForeignKey("members.id"))
+    paths: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    verdict: Mapped[str] = mapped_column(String)  # approve | changes_requested | incomplete
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = _now()
+
+
+class ReviewComment(Base):
+    __tablename__ = "review_comments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("reviews.id"))
+    path: Mapped[str | None] = mapped_column(String, nullable=True)
+    line: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String)  # reviewer | precheck
+    created_at: Mapped[datetime] = _now()
+
+
+class TestRun(Base):
+    __tablename__ = "test_runs"
+    __test__ = False  # not a pytest class
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("instance_runs.id"), nullable=True)
+    member_id: Mapped[str | None] = mapped_column(ForeignKey("members.id"), nullable=True)
+    paths: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)
+    timed_out: Mapped[bool] = mapped_column(Boolean, default=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    output: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = _now()

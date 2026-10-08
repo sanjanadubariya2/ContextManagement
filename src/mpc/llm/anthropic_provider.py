@@ -85,6 +85,7 @@ class AnthropicAdapter:
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             refusal_category=refusal,
+            raw_content=[b.model_dump(mode="json", exclude_none=True) for b in response.content],
         )
 
     def complete(self, messages, *, system=None, model=None, max_tokens=None) -> Completion:

@@ -17,6 +17,8 @@ dependencies = [
     "anthropic>=0.70",
     "tree-sitter>=0.23",
     "tree-sitter-typescript>=0.23",
+    "langgraph>=0.4",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -24,9 +26,16 @@ voyage = ["voyageai>=0.3"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
+site = [
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "pyjwt>=2.15.1",
+]
 
 [project.scripts]
-mpc = "mpc.cli:app"
+mpc = "mpc.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -38,3 +47,8 @@ packages = ["src/mpc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["db: needs the local Postgres and Redis from docker compose"]
+
+[tool.uv]
+# `site` holds the starter website's own runtime deps, so Testing workers'
+# tests can import the generated backend.
+default-groups = ["dev", "site"]

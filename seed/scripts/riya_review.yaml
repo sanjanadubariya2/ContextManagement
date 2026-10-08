@@ -1,0 +1,30 @@
+# Plan scenario step 5 (independent review). /review spawns an isolated
+# Frontend Reviewer. The deterministic pre-check flags the localStorage line
+# against the approved cookie decision; the Reviewer confirms it. Run after
+# riya_login_page.yaml.
+name: Riya's review request (t21)
+member: riya
+task: t21
+request: /review frontend/src/api/auth.ts
+expect:
+  action: request_review
+  status: completed
+  verdict: changes_requested
+
+steps:
+  reviewer:
+    - tool: read_file
+      input: {path: frontend/src/api/auth.ts}
+    - tool: submit_review
+      input:
+        verdict: changes_requested
+        summary: >-
+          login() reads a token from the response body and stores it in localStorage. The approved
+          decision auth.token_transport = http_only_cookie means the browser never sees a token, and
+          the contract returns 204 with no body.
+        comments:
+          - path: frontend/src/api/auth.ts
+            line: 13
+            body: >-
+              Remove the localStorage write. The server sets an HttpOnly cookie and apiFetch already
+              sends credentials, so login() should only await the 204.

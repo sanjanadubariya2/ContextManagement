@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -18,14 +19,19 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://mpc:mpc@localhost:5433/mpc"
     redis_url: str = "redis://localhost:6380/0"
 
-    llm_provider: str = "auto"  # auto | anthropic | fake
-    llm_model: str = "claude-opus-5-5"
+    # auto (default): Gemini if GEMINI_API_KEY/GOOGLE_API_KEY is set, else Anthropic if
+    # ANTHROPIC_API_KEY is set, else an error. Or force: gemini | anthropic | fake (tests only).
+    llm_provider: str = "auto"
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_small_model: str = "gemini-3.8-flash"
+    gemini_embed_model: str = "gemini-embedding-001"
+    llm_model: str = "claude-opus-5-5"  # Anthropic models
     llm_small_model: str = "claude-haiku-4-5"
     llm_effort: str = "medium"
     llm_max_tokens: int = 16000
     llm_fallbacks: bool = True
 
-    embed_provider: str = "hash"  # hash | voyage
+    embed_provider: str = "hash"  # hash | gemini | voyage (changing it needs `mpc init --reset`)
     voyage_model: str = "voyage-3.5"
 
     # Context Manager
@@ -44,7 +50,29 @@ class Settings(BaseSettings):
     closure_reserve: float = 0.10  # share of free budget held back for import closure
     package_cache_ttl_s: int = 3600
 
+    # Agents (Increment 3)
+    expansion_budget: int = 3000  # tokens per request_more_context call
+    max_reruns: int = 1  # automatic re-runs of a stale instance
+    test_timeout_s: int = 120
+    test_python: str = ""  # interpreter for Testing workers' tests; default: this one
+
+
+def load_env_files() -> list[Path]:
+    """Export .env into the process environment so third-party SDKs see it too.
+
+    pydantic-settings reads .env only for MPC_* fields; ANTHROPIC_API_KEY and
+    VOYAGE_API_KEY must reach os.environ, where the Anthropic and Voyage SDKs
+    look. Variables already set in the shell win over the file.
+    """
+    loaded = []
+    for path in dict.fromkeys((Path.cwd() / ".env", REPO_ROOT / ".env")):
+        if path.is_file():
+            load_dotenv(path, override=False)
+            loaded.append(path)
+    return loaded
+
 
 @lru_cache
 def get_settings() -> Settings:
+    load_env_files()
     return Settings()

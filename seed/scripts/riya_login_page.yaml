@@ -1,0 +1,57 @@
+# Plan scenario step 1 (a Frontend Worker builds the page). This scripted Worker
+# deliberately makes the mistake scenario step 5 is about: it reads the token
+# from the response body and keeps it in localStorage, against the approved
+# cookie decision. Run riya_review.yaml afterwards to see the Reviewer catch it.
+name: Riya's login page (t21)
+member: riya
+task: t21
+request: Build the login page with inline field errors, wired to the login API.
+expect:
+  action: delegate
+  status: completed
+  promoted: [frontend/src/api/auth.ts]
+
+steps:
+  personal:
+    - tool: delegate
+      input:
+        task_id: t21
+        instructions: >-
+          Build the login page: inline errors under each field and the login call wired to
+          POST /api/auth/login, redirecting to /dashboard on success.
+  worker:
+    - tool: read_file
+      input: {path: frontend/src/api/auth.ts}
+    - tool: write_file
+      input:
+        path: frontend/src/api/auth.ts
+        content: |
+          import { apiFetch } from "./client";
+
+          export interface User {
+            id: string;
+            email: string;
+          }
+
+          export async function login(email: string, password: string): Promise<void> {
+            const res = await apiFetch<{ access_token?: string }>("/api/auth/login", {
+              method: "POST",
+              body: JSON.stringify({ email, password }),
+            });
+            if (res?.access_token) localStorage.setItem("access_token", res.access_token);
+          }
+
+          export async function logout(): Promise<void> {
+            await apiFetch<void>("/api/auth/logout", { method: "POST" });
+          }
+
+          export async function currentUser(): Promise<User | null> {
+            try {
+              return await apiFetch<User>("/api/auth/me");
+            } catch {
+              return null;
+            }
+          }
+    - tool: finish
+      input:
+        summary: Wired login() to POST /api/auth/login and kept the returned token for later requests.
